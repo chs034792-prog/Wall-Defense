@@ -16,6 +16,7 @@ window.runBot = function (maxWave, opts) {
     if (S.wave >= 55) for (const x of [14, 15, 16]) { put(S.tech.forge ? 'neo' : 'steel', x, 36); put('wall', x, 35); }
   }
   function act() {
+    if (S.pick) chooseRelic(S.pick.opts[0]);
     walls();
     while (S.workers < 10 && S.min >= 50) train('worker');
     for (const [x, y] of cannonSpots.slice(0, 4)) put('cannon', x, y);
