@@ -1,0 +1,717 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>벽짓고 살아남기</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d10; color: #e8e8e8;
+    font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; user-select: none; }
+  canvas#game { display: block; position: absolute; inset: 0; }
+  #top { position: absolute; top: 0; left: 0; right: 0; height: 40px; display: flex; gap: 22px; white-space: nowrap; overflow: hidden; align-items: center;
+    padding: 0 16px; background: linear-gradient(#1b2028, #12161c); border-bottom: 1px solid #333c48; font-size: 15px; z-index: 2; }
+  #top b { color: #7fd3ff; }
+  #money b { color: #6fe39a; }
+  #phase.night b { color: #ff6b6b; }
+  #phase.day b { color: #ffd166; }
+  #bottom { position: absolute; left: 0; bottom: 0; right: 220px; display: flex; gap: 6px; padding: 8px;
+    background: rgba(18,22,28,.92); border-top: 1px solid #333c48; z-index: 2; flex-wrap: wrap; }
+  .btn { min-width: 92px; padding: 6px 8px; border: 1px solid #3c4756; border-radius: 6px; background: #1f2630; color: #e8e8e8;
+    cursor: pointer; font-size: 13px; line-height: 1.3; text-align: left; }
+  .btn:hover { border-color: #7fd3ff; }
+  .btn.sel { border-color: #ffd166; background: #3a3420; }
+  .btn.off { opacity: .45; }
+  .btn small { color: #9aa6b4; display: block; }
+  .btn .k { color: #ffd166; font-weight: bold; margin-right: 4px; }
+  .sep { width: 1px; background: #333c48; margin: 0 4px; }
+  #mini { position: absolute; right: 0; bottom: 0; width: 220px; height: 165px; background: #000; border-left: 1px solid #333c48;
+    border-top: 1px solid #333c48; z-index: 2; }
+  #banner { position: absolute; top: 22%; left: 0; right: 0; text-align: center; font-size: 34px; font-weight: bold;
+    text-shadow: 0 2px 8px #000; pointer-events: none; z-index: 3; opacity: 0; transition: opacity .4s; }
+  #banner small { display: block; font-size: 16px; font-weight: normal; color: #ccc; margin-top: 6px; }
+  #overlay { position: absolute; inset: 0; background: rgba(0,0,0,.78); display: flex; align-items: center; justify-content: center;
+    z-index: 5; }
+  #overlay .box { max-width: 560px; padding: 26px 30px; background: #161b22; border: 1px solid #3c4756; border-radius: 10px; line-height: 1.65; }
+  #overlay h1 { margin: 0 0 8px; font-size: 28px; }
+  #overlay ul { padding-left: 20px; margin: 8px 0 16px; color: #c9d1d9; font-size: 14px; }
+  #overlay button { font-size: 17px; padding: 8px 22px; border-radius: 6px; border: 0; background: #ffd166; color: #222; cursor: pointer; font-weight: bold; }
+  @media (max-width: 1100px) { #hint { display: none; } }
+  #log { position: absolute; left: 12px; top: 50px; font-size: 13px; z-index: 2; pointer-events: none; text-shadow: 0 1px 3px #000; }
+  #log div { opacity: .9; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="top">
+  <span id="money">💰 <b>0</b></span>
+  <span id="phase" class="day">☀ <b>낮</b> <span id="timer">0</span>초</span>
+  <span>🌙 밤 <b id="nightNo">0</b> / <span id="nightMax">10</span></span>
+  <span>❤ 체력 <b id="hp">100</b></span>
+  <span>👹 킬러 <b id="klv">Lv 1</b></span>
+  <span id="hint" style="margin-left:auto;color:#9aa6b4;font-size:12px">우클릭 이동·채굴 · WASD 이동 · 1~5 건설 · X 판매 · R 자동수리 · N 밤 바로 시작 · P 일시정지</span>
+</div>
+<div id="log"></div>
+<div id="bottom"></div>
+<canvas id="mini" width="220" height="165"></canvas>
+<div id="banner"></div>
+<div id="overlay"><div class="box">
+  <h1>🧱 벽짓고 살아남기</h1>
+  <div>스타크래프트 유즈맵 '벽짓고 살아남기' 스타일 싱글 플레이.</div>
+  <ul>
+    <li><b>낮</b>에는 미네랄을 캐고 벽·터렛을 지어 요새를 만든다.</li>
+    <li><b>밤</b>이 되면 <b style="color:#ff6b6b">킬러</b>와 졸개들이 몰려와 가장 약한 곳의 벽을 부수고 들어온다.</li>
+    <li>킬러는 밤마다 강해진다. 밤 중에 킬러를 쓰러뜨리면 <b>격퇴</b> — 밤이 일찍 끝나고 보상을 받는다.</li>
+    <li>보급고는 돈을 계속 벌어 주고, 문은 나만 지나갈 수 있다.</li>
+    <li>가까이 있는 부서진 건물은 자동으로 수리한다(돈 소모, R로 끄고 켜기).</li>
+    <li><b>10번째 밤</b>을 버티면 승리!</li>
+  </ul>
+  <button id="startBtn">시작</button>
+</div></div>
+<script>
+'use strict';
+// ───────── 설정 ─────────
+const T = 32, W = 64, H = 48;
+const CFG = {
+  startMoney: 150, passive: 1, mineAmount: 8, mineTime: 1.0,
+  firstDay: 75, day: 40, night: 50, nights: 10,
+  buildRange: 8, playerSpeed: 4.2, playerHp: 150,
+  repairRate: 30, repairCostPer: 0.12,   // 초당 HP, HP당 비용
+};
+const TYPES = {
+  wall:   { key: '1', name: '벽',     cost: 20,  hp: 160, color: '#8b8f98', desc: '싸고 빠른 기본 벽' },
+  steel:  { key: '2', name: '철벽',   cost: 80,  hp: 650, color: '#5f7d9c', desc: '튼튼한 강화 벽' },
+  gate:   { key: '3', name: '문',     cost: 40,  hp: 260, color: '#a0763f', desc: '나만 지나갈 수 있다', pass: true },
+  turret: { key: '4', name: '터렛',   cost: 120, hp: 220, color: '#c9a227', desc: '사거리 4.5 자동 공격', range: 4.5, dmg: 14, rate: 0.6 },
+  depot:  { key: '5', name: '보급고', cost: 150, hp: 360, color: '#4e9a6b', desc: '초당 +2원', income: 2 },
+};
+const WALLISH = ['wall', 'steel', 'gate'];
+const UPGRADES = {
+  armor:  { name: '벽 강화',   desc: '벽·철벽·문 체력 +30%', base: 120, step: 1.6, max: 8 },
+  gun:    { name: '터렛 화력', desc: '터렛 공격력 +30%',     base: 150, step: 1.6, max: 8 },
+  pick:   { name: '채굴 숙련', desc: '채굴량 +40%',           base: 100, step: 1.7, max: 6 },
+};
+const killerStat = n => ({ hp: Math.round(320 * Math.pow(1.5, n - 1)), dmg: 12 * Math.pow(1.38, n - 1), rate: 0.9, spd: 2.3 });
+const minionStat = n => ({ hp: Math.round(50 * Math.pow(1.38, n - 1)), dmg: 4 * Math.pow(1.32, n - 1), rate: 0.7, spd: 2.9 });
+
+// ───────── 상태 ─────────
+let S;
+const cv = document.getElementById('game'), cx = cv.getContext('2d');
+const mini = document.getElementById('mini'), mx = mini.getContext('2d');
+const dark = document.createElement('canvas'), dx = dark.getContext('2d');
+const idx = (x, y) => y * W + x;
+const inb = (x, y) => x >= 0 && y >= 0 && x < W && y < H;
+
+function newGame() {
+  S = {
+    money: CFG.startMoney, phase: 'day', timer: CFG.firstDay, night: 0,
+    grid: new Array(W * H).fill(null),
+    player: { x: W / 2 + .5, y: H / 2 + .5, hp: CFG.playerHp, path: [], mine: -1, mineT: 0, atkCd: 0 },
+    mons: [], fx: [], floats: [],
+    sel: null, sellMode: false, autoRepair: true, paused: false, over: false,
+    up: { armor: 0, gun: 0, pick: 0 },
+    field: new Float32Array(W * H), fieldT: 0, spawnQ: [], killer: null, kills: 0,
+  };
+  // 미네랄 덩어리
+  let clusters = 0, guard = 0;
+  while (clusters < 14 && guard++ < 500) {
+    const cxm = 3 + Math.floor(Math.random() * (W - 6)), cym = 3 + Math.floor(Math.random() * (H - 6));
+    const d = Math.hypot(cxm - W / 2, cym - H / 2);
+    if (d < 4 || (clusters < 3 && d > 10) || (clusters >= 3 && d < 9)) continue;
+    const n = 4 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < n; i++) {
+      const x = cxm + Math.floor(Math.random() * 3) - 1, y = cym + Math.floor(Math.random() * 3) - 1;
+      if (inb(x, y) && !S.grid[idx(x, y)]) S.grid[idx(x, y)] = { type: 'mineral', hp: 500, maxhp: 500, amount: 400 };
+    }
+    clusters++;
+  }
+  S.grid[idx(W / 2, H / 2)] = null;
+  buildUI();
+  banner('첫째 날', '밤이 오기 전에 미네랄을 캐고 벽을 쌓으세요');
+}
+
+// ───────── 유틸 ─────────
+const cell = (x, y) => inb(x, y) ? S.grid[idx(x, y)] : { type: 'edge' };
+function blocksPlayer(x, y) { const c = cell(x, y); return !!c && !(TYPES[c.type] && TYPES[c.type].pass); }
+function maxHpOf(type) {
+  let hp = TYPES[type].hp;
+  if (WALLISH.includes(type)) hp *= 1 + 0.3 * S.up.armor;
+  return Math.round(hp);
+}
+function upCost(k) { return Math.round(UPGRADES[k].base * Math.pow(UPGRADES[k].step, S.up[k])); }
+function log(msg, color) {
+  const el = document.getElementById('log'), d = document.createElement('div');
+  d.textContent = msg; if (color) d.style.color = color;
+  el.prepend(d); while (el.children.length > 6) el.lastChild.remove();
+  setTimeout(() => d.remove(), 6000);
+}
+let bannerTO;
+function banner(t, sub) {
+  const b = document.getElementById('banner');
+  b.innerHTML = t + (sub ? `<small>${sub}</small>` : '');
+  b.style.opacity = 1; clearTimeout(bannerTO); bannerTO = setTimeout(() => b.style.opacity = 0, 2600);
+}
+function floatText(x, y, text, color) { S.floats.push({ x, y, text, color, t: 1.2 }); }
+
+// ───────── 길찾기 ─────────
+// 몬스터용: 플레이어로부터의 비용장(Dijkstra). 건물은 체력만큼 비싼 칸.
+function enterCost(i) {
+  const c = S.grid[i];
+  if (!c) return 1;
+  return 1 + c.hp / 35;
+}
+const heap = { a: [], push(n, p) { const a = this.a; a.push([p, n]); let i = a.length - 1;
+    while (i > 0) { const j = (i - 1) >> 1; if (a[j][0] <= a[i][0]) break; [a[i], a[j]] = [a[j], a[i]]; i = j; } },
+  pop() { const a = this.a, top = a[0], last = a.pop(); if (a.length) { a[0] = last; let i = 0;
+      for (;;) { let l = 2 * i + 1, r = l + 1, m = i; if (l < a.length && a[l][0] < a[m][0]) m = l; if (r < a.length && a[r][0] < a[m][0]) m = r;
+        if (m === i) break; [a[i], a[m]] = [a[m], a[i]]; i = m; } } return top; } };
+const DIRS = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+function computeField() {
+  const f = S.field; f.fill(1e9); heap.a.length = 0;
+  const px = Math.floor(S.player.x), py = Math.floor(S.player.y), s = idx(px, py);
+  f[s] = 0; heap.push(s, 0);
+  while (heap.a.length) {
+    const [d, i] = heap.pop(); if (d > f[i]) continue;
+    const x = i % W, y = (i / W) | 0, ec = enterCost(i);
+    for (const [ddx, ddy] of DIRS) {
+      const nx = x + ddx, ny = y + ddy; if (!inb(nx, ny)) continue;
+      if (ddx && ddy && (S.grid[idx(x + ddx, y)] || S.grid[idx(x, y + ddy)])) continue; // 모서리 끼기 금지
+      const ni = idx(nx, ny), nd = d + ec * (ddx && ddy ? 1.414 : 1);
+      if (nd < f[ni]) { f[ni] = nd; heap.push(ni, nd); }
+    }
+  }
+}
+// 플레이어용 BFS (8방향, 모서리 끼기 금지). goals: 목표 칸 집합
+function findPath(sx, sy, goalFn) {
+  const prev = new Int32Array(W * H).fill(-2), q = [idx(sx, sy)];
+  prev[q[0]] = -1;
+  for (let h = 0; h < q.length; h++) {
+    const i = q[h], x = i % W, y = (i / W) | 0;
+    if (goalFn(x, y)) { const p = []; let k = i; while (k !== -1) { p.push(k); k = prev[k]; } p.reverse(); p.shift();
+      return p.map(k => ({ x: k % W + .5, y: ((k / W) | 0) + .5 })); }
+    for (const [ddx, ddy] of DIRS) {
+      const nx = x + ddx, ny = y + ddy; if (!inb(nx, ny) || blocksPlayer(nx, ny)) continue;
+      if (ddx && ddy && (blocksPlayer(x + ddx, y) || blocksPlayer(x, y + ddy))) continue;
+      const ni = idx(nx, ny); if (prev[ni] !== -2) continue; prev[ni] = i; q.push(ni);
+    }
+  }
+  return null;
+}
+
+// ───────── 행동 ─────────
+function orderMove(tx, ty) {
+  const p = S.player; p.mine = -1;
+  const path = findPath(Math.floor(p.x), Math.floor(p.y), (x, y) => x === tx && y === ty)
+    || findPath(Math.floor(p.x), Math.floor(p.y), (x, y) => Math.abs(x - tx) <= 1 && Math.abs(y - ty) <= 1);
+  p.path = path || [];
+}
+function orderMine(tx, ty) {
+  const p = S.player;
+  const path = findPath(Math.floor(p.x), Math.floor(p.y), (x, y) => Math.abs(x - tx) <= 1 && Math.abs(y - ty) <= 1);
+  if (!path) { log('갈 수 없는 곳입니다', '#ff9b9b'); return; }
+  p.path = path; p.mine = idx(tx, ty); p.mineT = 0;
+}
+function canPlace(tx, ty) {
+  if (!inb(tx, ty) || S.grid[idx(tx, ty)]) return false;
+  const p = S.player;
+  if (Math.hypot(tx + .5 - p.x, ty + .5 - p.y) > CFG.buildRange) return false;
+  if (Math.abs(tx + .5 - p.x) < .85 && Math.abs(ty + .5 - p.y) < .85) return false;
+  for (const m of S.mons) if (Math.abs(tx + .5 - m.x) < .9 && Math.abs(ty + .5 - m.y) < .9) return false;
+  return true;
+}
+function place(tx, ty) {
+  const t = TYPES[S.sel];
+  if (!canPlace(tx, ty)) return false;
+  if (S.money < t.cost) { log('돈이 부족합니다', '#ff9b9b'); return false; }
+  S.money -= t.cost;
+  const hp = maxHpOf(S.sel);
+  S.grid[idx(tx, ty)] = { type: S.sel, hp, maxhp: hp, cd: 0 };
+  S.fieldT = 0;
+  // 플레이어 경로가 막히면 다시 계산
+  const p = S.player;
+  if (p.path.some(n => Math.floor(n.x) === tx && Math.floor(n.y) === ty)) {
+    const last = p.path[p.path.length - 1];
+    if (p.mine >= 0) { const m = p.mine; orderMine(m % W, (m / W) | 0); } else orderMove(Math.floor(last.x), Math.floor(last.y));
+  }
+  return true;
+}
+function sell(tx, ty) {
+  const c = cell(tx, ty);
+  if (!c || !TYPES[c.type]) return;
+  const refund = Math.floor(TYPES[c.type].cost * 0.5 * c.hp / c.maxhp);
+  S.money += refund; S.grid[idx(tx, ty)] = null; S.fieldT = 0;
+  floatText(tx + .5, ty + .5, '+' + refund, '#6fe39a');
+}
+function buyUp(k) {
+  if (S.up[k] >= UPGRADES[k].max) return;
+  const c = upCost(k);
+  if (S.money < c) { log('돈이 부족합니다', '#ff9b9b'); return; }
+  S.money -= c; S.up[k]++;
+  if (k === 'armor') for (const g of S.grid) if (g && WALLISH.includes(g.type)) {
+    const nm = maxHpOf(g.type); g.hp += nm - g.maxhp; g.maxhp = nm;
+  }
+  log(`${UPGRADES[k].name} Lv ${S.up[k]}`, '#7fd3ff');
+  buildUI();
+}
+
+// ───────── 낮/밤 ─────────
+function edgeSpawn() {
+  const p = S.player;
+  for (let tries = 0; tries < 200; tries++) {
+    const side = Math.floor(Math.random() * 4);
+    let x = side === 0 ? 0 : side === 1 ? W - 1 : Math.floor(Math.random() * W);
+    let y = side === 2 ? 0 : side === 3 ? H - 1 : Math.floor(Math.random() * H);
+    if (S.grid[idx(x, y)]) continue;
+    if (Math.hypot(x - p.x, y - p.y) < 18) continue;
+    return { x: x + .5, y: y + .5 };
+  }
+  return { x: .5, y: .5 };
+}
+function startNight() {
+  S.phase = 'night'; S.night++; S.timer = CFG.night;
+  const ks = killerStat(S.night), at = edgeSpawn();
+  S.killer = { kind: 'killer', x: at.x, y: at.y, hp: ks.hp, maxhp: ks.hp, dmg: ks.dmg, rate: ks.rate, spd: ks.spd, cd: 0, r: .45 };
+  S.mons.push(S.killer);
+  const n = 2 + S.night * 2;
+  for (let i = 0; i < n; i++) S.spawnQ.push(1 + i * (14 / n));
+  S.spawnClock = 0;
+  S.fieldT = 0;
+  banner(`${S.night}번째 밤`, `킬러 Lv ${S.night} 출현! (체력 ${ks.hp})`);
+}
+function endNight(repelled) {
+  for (const m of S.mons) S.fx.push({ kind: 'puff', x: m.x, y: m.y, t: .6 });
+  S.mons = []; S.spawnQ = []; S.killer = null;
+  if (S.night >= CFG.nights) { gameOver(true); return; }
+  const bonus = 60 + S.night * (repelled ? 60 : 30);
+  S.money += bonus;
+  S.phase = 'day'; S.timer = CFG.day;
+  S.player.hp = Math.min(CFG.playerHp, S.player.hp + 50);
+  banner(repelled ? '킬러 격퇴!' : '날이 밝았다', `보상 +${bonus}원 · 다음은 ${S.night + 1}번째 밤`);
+}
+function gameOver(win) {
+  S.over = true;
+  const o = document.getElementById('overlay');
+  o.style.display = 'flex';
+  o.querySelector('.box').innerHTML = win
+    ? `<h1>🏆 생존 성공!</h1><div>${CFG.nights}번의 밤을 모두 버텼습니다. 처치한 몬스터 ${S.kills}마리.</div><br><button onclick="start()">다시 하기</button>`
+    : `<h1>💀 사망</h1><div>${S.night}번째 밤에 쓰러졌습니다. 처치한 몬스터 ${S.kills}마리.</div><br><button onclick="start()">다시 하기</button>`;
+}
+
+// ───────── 업데이트 ─────────
+function update(dt) {
+  const p = S.player;
+  S.timer -= dt;
+  if (S.phase === 'day' && S.timer <= 0) startNight();
+  else if (S.phase === 'night' && S.timer <= 0) endNight(false);
+  if (S.over) return;
+
+  // 수입
+  let inc = CFG.passive;
+  for (const g of S.grid) if (g && g.type === 'depot') inc += TYPES.depot.income;
+  S.money += inc * dt;
+
+  // 플레이어 이동
+  const kx = (keys.d ? 1 : 0) - (keys.a ? 1 : 0), ky = (keys.s ? 1 : 0) - (keys.w ? 1 : 0);
+  if (kx || ky) {
+    p.path = []; p.mine = -1;
+    const l = Math.hypot(kx, ky); moveBody(p, kx / l * CFG.playerSpeed * dt, ky / l * CFG.playerSpeed * dt, .3);
+  } else if (p.path.length) {
+    const n = p.path[0], ddx = n.x - p.x, ddy = n.y - p.y, d = Math.hypot(ddx, ddy), st = CFG.playerSpeed * dt;
+    if (blocksPlayer(Math.floor(n.x), Math.floor(n.y))) p.path = [];
+    else if (d <= st) { p.x = n.x; p.y = n.y; p.path.shift(); }
+    else { p.x += ddx / d * st; p.y += ddy / d * st; }
+  }
+  // 채굴
+  if (p.mine >= 0 && !p.path.length) {
+    const m = S.grid[p.mine];
+    if (!m || m.type !== 'mineral') p.mine = -1;
+    else if (Math.hypot(p.mine % W + .5 - p.x, ((p.mine / W) | 0) + .5 - p.y) < 1.7) {
+      p.mineT += dt;
+      if (p.mineT >= CFG.mineTime) {
+        p.mineT = 0;
+        const amt = Math.min(m.amount, Math.round(CFG.mineAmount * (1 + .4 * S.up.pick)));
+        m.amount -= amt; S.money += amt;
+        floatText(p.mine % W + .5, ((p.mine / W) | 0) + .2, '+' + amt, '#7fd3ff');
+        if (m.amount <= 0) { S.grid[p.mine] = null; p.mine = -1; S.fieldT = 0; log('미네랄이 바닥났습니다'); }
+      }
+    } else p.mine = -1;
+  }
+  // 자동 수리
+  if (S.autoRepair) {
+    let budget = CFG.repairRate * dt;
+    const px = Math.floor(p.x), py = Math.floor(p.y);
+    for (let y = py - 1; y <= py + 1 && budget > 0; y++) for (let x = px - 1; x <= px + 1 && budget > 0; x++) {
+      const c = cell(x, y);
+      if (!c || !TYPES[c.type] || c.hp >= c.maxhp) continue;
+      const amt = Math.min(budget, c.maxhp - c.hp, S.money / CFG.repairCostPer);
+      if (amt <= 0) continue;
+      c.hp += amt; S.money -= amt * CFG.repairCostPer; budget -= amt;
+      if (Math.random() < dt * 8) S.fx.push({ kind: 'spark', x: x + Math.random(), y: y + Math.random(), t: .3 });
+    }
+  }
+  p.atkCd -= dt;
+  if (S.phase === 'day' && p.hp < CFG.playerHp) p.hp = Math.min(CFG.playerHp, p.hp + 2 * dt);
+
+  // 밤: 졸개 스폰
+  if (S.phase === 'night') {
+    S.spawnClock += dt;
+    while (S.spawnQ.length && S.spawnQ[0] <= S.spawnClock) {
+      S.spawnQ.shift();
+      const ms = minionStat(S.night), at = edgeSpawn();
+      S.mons.push({ kind: 'minion', x: at.x, y: at.y, hp: ms.hp, maxhp: ms.hp, dmg: ms.dmg, rate: ms.rate, spd: ms.spd, cd: 0, r: .3 });
+    }
+  }
+
+  // 비용장 갱신
+  S.fieldT -= dt;
+  if (S.fieldT <= 0) { computeField(); S.fieldT = .35; }
+
+  // 몬스터
+  for (const m of S.mons) {
+    m.cd -= dt;
+    const dp = Math.hypot(p.x - m.x, p.y - m.y);
+    if (dp < m.r + .55) {
+      if (m.cd <= 0) { m.cd = m.rate; p.hp -= m.dmg; S.fx.push({ kind: 'hit', x: p.x, y: p.y, t: .25 }); }
+      continue;
+    }
+    const tx = Math.floor(m.x), ty = Math.floor(m.y);
+    let best = -1, bd = S.field[idx(tx, ty)], bdx = 0, bdy = 0;
+    for (const [ddx, ddy] of DIRS) {
+      const nx = tx + ddx, ny = ty + ddy; if (!inb(nx, ny)) continue;
+      if (ddx && ddy && (S.grid[idx(tx + ddx, ty)] || S.grid[idx(tx, ty + ddy)])) continue;
+      const ni = idx(nx, ny);
+      if (S.field[ni] < bd) { bd = S.field[ni]; best = ni; bdx = ddx; bdy = ddy; }
+    }
+    let gx, gy;
+    if (best < 0) { gx = p.x; gy = p.y; } // 같은 칸이거나 막다른 곳: 직접 접근
+    else {
+      const target = S.grid[best];
+      if (target) { // 건물 공격
+        if (m.cd <= 0) {
+          m.cd = m.rate; target.hp -= m.dmg;
+          S.fx.push({ kind: 'hit', x: best % W + .5, y: ((best / W) | 0) + .5, t: .2 });
+          if (target.hp <= 0) destroy(best);
+        }
+        // 칸 가운데로 정렬
+        gx = tx + .5; gy = ty + .5;
+      } else { gx = best % W + .5; gy = ((best / W) | 0) + .5; }
+    }
+    const ddx = gx - m.x, ddy = gy - m.y, d = Math.hypot(ddx, ddy), st = m.spd * dt;
+    if (d > .01) { const k = Math.min(1, st / d); m.x += ddx * k; m.y += ddy * k; }
+  }
+  // 몬스터끼리 살짝 밀어내기
+  for (let i = 0; i < S.mons.length; i++) for (let j = i + 1; j < S.mons.length; j++) {
+    const a = S.mons[i], b = S.mons[j], ddx = b.x - a.x, ddy = b.y - a.y, d = Math.hypot(ddx, ddy), mn = (a.r + b.r) * .8;
+    if (d > 0 && d < mn) { const push = (mn - d) / 2 / d; a.x -= ddx * push; a.y -= ddy * push; b.x += ddx * push; b.y += ddy * push; }
+  }
+
+  // 플레이어 근접 공격(약함)
+  if (p.atkCd <= 0) {
+    for (const m of S.mons) if (Math.hypot(m.x - p.x, m.y - p.y) < 1.2) { m.hp -= 5; p.atkCd = .5; S.fx.push({ kind: 'hit', x: m.x, y: m.y, t: .15 }); break; }
+  }
+  // 터렛
+  const tdmg = TYPES.turret.dmg * (1 + .3 * S.up.gun);
+  for (let i = 0; i < S.grid.length; i++) {
+    const g = S.grid[i]; if (!g || g.type !== 'turret') continue;
+    g.cd -= dt; if (g.cd > 0) continue;
+    const x = i % W + .5, y = ((i / W) | 0) + .5;
+    let tgt = null, td = TYPES.turret.range;
+    for (const m of S.mons) { const d = Math.hypot(m.x - x, m.y - y); if (d < td) { td = d; tgt = m; } }
+    if (tgt) { g.cd = TYPES.turret.rate; tgt.hp -= tdmg; S.fx.push({ kind: 'shot', x, y, x2: tgt.x, y2: tgt.y, t: .1 }); }
+  }
+  // 사망 처리
+  for (const m of S.mons) if (m.hp <= 0 && !m.dead) {
+    m.dead = true; S.kills++;
+    S.fx.push({ kind: 'puff', x: m.x, y: m.y, t: .6 });
+    if (m.kind === 'minion') { const r = 4 + S.night * 2; S.money += r; floatText(m.x, m.y, '+' + r, '#6fe39a'); }
+  }
+  if (S.killer && S.killer.dead) { S.mons = S.mons.filter(m => !m.dead); endNight(true); return; }
+  S.mons = S.mons.filter(m => !m.dead);
+
+  if (p.hp <= 0) { p.hp = 0; gameOver(false); }
+
+  for (const f of S.fx) f.t -= dt;
+  S.fx = S.fx.filter(f => f.t > 0);
+  for (const f of S.floats) { f.t -= dt; f.y -= dt * .8; }
+  S.floats = S.floats.filter(f => f.t > 0);
+}
+function destroy(i) {
+  const g = S.grid[i];
+  if (g && g.type !== 'mineral') log(`${TYPES[g.type].name}이(가) 부서졌습니다!`, '#ff9b9b');
+  S.grid[i] = null; S.fieldT = 0;
+  S.fx.push({ kind: 'puff', x: i % W + .5, y: ((i / W) | 0) + .5, t: .5 });
+}
+function moveBody(b, ddx, ddy, r) {
+  const hit = (x, y) => blocksPlayer(Math.floor(x - r), Math.floor(y - r)) || blocksPlayer(Math.floor(x + r), Math.floor(y - r))
+    || blocksPlayer(Math.floor(x - r), Math.floor(y + r)) || blocksPlayer(Math.floor(x + r), Math.floor(y + r));
+  if (!hit(b.x + ddx, b.y)) b.x += ddx;
+  if (!hit(b.x, b.y + ddy)) b.y += ddy;
+}
+
+// ───────── 그리기 ─────────
+const cam = { x: 0, y: 0 };
+const mouse = { x: 0, y: 0, down: false, lastTile: -1 };
+function resize() {
+  const w = Math.max(1, innerWidth), h = Math.max(1, innerHeight);
+  cv.width = w; cv.height = h; dark.width = w; dark.height = h;
+}
+function draw() {
+  const p = S.player, vw = cv.width, vh = cv.height;
+  cam.x = Math.max(0, Math.min(W * T - vw, p.x * T - vw / 2));
+  cam.y = Math.max(-40, Math.min(H * T - vh + 60, p.y * T - vh / 2));
+  if (W * T < vw) cam.x = (W * T - vw) / 2;
+  cx.fillStyle = '#0b0d10'; cx.fillRect(0, 0, vw, vh);
+  cx.save(); cx.translate(-Math.round(cam.x), -Math.round(cam.y));
+  const x0 = Math.max(0, Math.floor(cam.x / T)), y0 = Math.max(0, Math.floor(cam.y / T));
+  const x1 = Math.min(W - 1, Math.ceil((cam.x + vw) / T)), y1 = Math.min(H - 1, Math.ceil((cam.y + vh) / T));
+  // 땅
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    cx.fillStyle = (x + y) % 2 ? '#2b3326' : '#2e3729';
+    cx.fillRect(x * T, y * T, T, T);
+  }
+  // 건설 범위
+  if (S.sel) {
+    cx.strokeStyle = 'rgba(255,209,102,.35)'; cx.setLineDash([6, 6]);
+    cx.beginPath(); cx.arc(p.x * T, p.y * T, CFG.buildRange * T, 0, 7); cx.stroke(); cx.setLineDash([]);
+  }
+  // 건물
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const g = S.grid[idx(x, y)]; if (!g) continue;
+    drawCell(g, x * T, y * T);
+  }
+  // 터렛 사거리(선택 시)
+  if (S.sel === 'turret') {
+    const t = tileAtMouse();
+    cx.strokeStyle = 'rgba(201,162,39,.5)'; cx.beginPath(); cx.arc((t.x + .5) * T, (t.y + .5) * T, TYPES.turret.range * T, 0, 7); cx.stroke();
+  }
+  // 플레이어 경로
+  if (p.path.length) {
+    cx.strokeStyle = 'rgba(127,211,255,.35)'; cx.beginPath(); cx.moveTo(p.x * T, p.y * T);
+    for (const n of p.path) cx.lineTo(n.x * T, n.y * T); cx.stroke();
+  }
+  // 몬스터
+  for (const m of S.mons) {
+    const r = m.r * T;
+    if (m.kind === 'killer') {
+      cx.fillStyle = '#b3202a'; cx.beginPath();
+      for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2 + performance.now() / 600, rr = k % 2 ? r : r * 1.35;
+        cx.lineTo(m.x * T + Math.cos(a) * rr, m.y * T + Math.sin(a) * rr); }
+      cx.fill(); cx.fillStyle = '#ffde59'; cx.beginPath(); cx.arc(m.x * T - 5, m.y * T - 3, 3, 0, 7); cx.arc(m.x * T + 5, m.y * T - 3, 3, 0, 7); cx.fill();
+      hpBar(m.x * T - 22, m.y * T - r - 16, 44, m.hp / m.maxhp, '#ff4d4d');
+      cx.fillStyle = '#fff'; cx.font = 'bold 11px sans-serif'; cx.textAlign = 'center'; cx.fillText('킬러 Lv ' + S.night, m.x * T, m.y * T - r - 20);
+    } else {
+      cx.fillStyle = '#8e44ad'; cx.beginPath(); cx.arc(m.x * T, m.y * T, r, 0, 7); cx.fill();
+      cx.fillStyle = '#e0c3f5'; cx.fillRect(m.x * T - 4, m.y * T - 3, 2, 2); cx.fillRect(m.x * T + 2, m.y * T - 3, 2, 2);
+      if (m.hp < m.maxhp) hpBar(m.x * T - 10, m.y * T - r - 6, 20, m.hp / m.maxhp, '#ff4d4d');
+    }
+  }
+  // 플레이어
+  cx.fillStyle = '#e8c547'; cx.beginPath(); cx.arc(p.x * T, p.y * T, 10, 0, 7); cx.fill();
+  cx.strokeStyle = '#6b5a14'; cx.lineWidth = 2; cx.stroke(); cx.lineWidth = 1;
+  cx.fillStyle = '#3b8fd1'; cx.fillRect(p.x * T - 5, p.y * T - 4, 10, 5);
+  if (p.mine >= 0 && !p.path.length) {
+    const a = Math.sin(performance.now() / 80) * .6;
+    cx.strokeStyle = '#ccc'; cx.lineWidth = 3; cx.beginPath(); cx.moveTo(p.x * T, p.y * T);
+    cx.lineTo(p.x * T + Math.cos(a - .6) * 14, p.y * T + Math.sin(a - .6) * 14); cx.stroke(); cx.lineWidth = 1;
+  }
+  hpBar(p.x * T - 14, p.y * T - 20, 28, p.hp / CFG.playerHp, '#6fe39a');
+  // 효과
+  for (const f of S.fx) {
+    if (f.kind === 'shot') { cx.strokeStyle = '#ffe28a'; cx.lineWidth = 2; cx.beginPath(); cx.moveTo(f.x * T, f.y * T); cx.lineTo(f.x2 * T, f.y2 * T); cx.stroke(); cx.lineWidth = 1; }
+    else if (f.kind === 'hit') { cx.fillStyle = `rgba(255,120,80,${f.t * 4})`; cx.beginPath(); cx.arc(f.x * T, f.y * T, 8, 0, 7); cx.fill(); }
+    else if (f.kind === 'puff') { cx.fillStyle = `rgba(200,200,200,${f.t})`; cx.beginPath(); cx.arc(f.x * T, f.y * T, (1 - f.t) * 30 + 6, 0, 7); cx.fill(); }
+    else if (f.kind === 'spark') { cx.fillStyle = '#ffd166'; cx.fillRect(f.x * T, f.y * T, 3, 3); }
+  }
+  // 고스트
+  const t = tileAtMouse();
+  if (S.sel && inb(t.x, t.y)) {
+    const ok = canPlace(t.x, t.y) && S.money >= TYPES[S.sel].cost;
+    cx.globalAlpha = .55; drawCell({ type: S.sel, hp: 1, maxhp: 1 }, t.x * T, t.y * T); cx.globalAlpha = 1;
+    cx.strokeStyle = ok ? '#6fe39a' : '#ff5555'; cx.lineWidth = 2; cx.strokeRect(t.x * T + 1, t.y * T + 1, T - 2, T - 2); cx.lineWidth = 1;
+  } else if (S.sellMode && inb(t.x, t.y)) {
+    const c = S.grid[idx(t.x, t.y)];
+    cx.strokeStyle = c && TYPES[c.type] ? '#ff9b3d' : '#666'; cx.lineWidth = 2; cx.strokeRect(t.x * T + 1, t.y * T + 1, T - 2, T - 2); cx.lineWidth = 1;
+  }
+  cx.restore();
+
+  // 밤 어둠
+  const nightK = S.phase === 'night' ? 1 : Math.max(0, 1 - S.timer / 6) * .9; // 해질녘 서서히
+  if (nightK > 0) {
+    dx.globalCompositeOperation = 'source-over'; dx.clearRect(0, 0, vw, vh);
+    dx.fillStyle = `rgba(5,8,25,${.72 * nightK})`; dx.fillRect(0, 0, vw, vh);
+    dx.globalCompositeOperation = 'destination-out';
+    const light = (wx, wy, rad) => {
+      const sx = wx * T - cam.x, sy = wy * T - cam.y, gr = dx.createRadialGradient(sx, sy, 0, sx, sy, rad * T);
+      gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      dx.fillStyle = gr; dx.beginPath(); dx.arc(sx, sy, rad * T, 0, 7); dx.fill();
+    };
+    light(p.x, p.y, 6);
+    for (let i = 0; i < S.grid.length; i++) { const g = S.grid[i]; if (g && (g.type === 'turret' || g.type === 'depot')) light(i % W + .5, ((i / W) | 0) + .5, 3); }
+    if (S.killer) light(S.killer.x, S.killer.y, 1.6);
+    cx.drawImage(dark, 0, 0);
+  }
+  // 떠오르는 글자
+  cx.font = 'bold 13px sans-serif'; cx.textAlign = 'center';
+  for (const f of S.floats) { cx.globalAlpha = Math.min(1, f.t * 2); cx.fillStyle = f.color; cx.fillText(f.text, f.x * T - cam.x, f.y * T - cam.y); }
+  cx.globalAlpha = 1;
+  // 킬러 방향 표시(화면 밖)
+  if (S.killer) {
+    const sx = S.killer.x * T - cam.x, sy = S.killer.y * T - cam.y;
+    if (sx < 0 || sy < 40 || sx > vw - 220 || sy > vh - 70) {
+      const cxp = vw / 2, cyp = vh / 2, a = Math.atan2(sy - cyp, sx - cxp);
+      const ex = cxp + Math.cos(a) * Math.min(vw / 2 - 60, 400), ey = cyp + Math.sin(a) * Math.min(vh / 2 - 90, 300);
+      cx.save(); cx.translate(ex, ey); cx.rotate(a); cx.fillStyle = '#ff4d4d';
+      cx.beginPath(); cx.moveTo(14, 0); cx.lineTo(-8, -9); cx.lineTo(-8, 9); cx.fill(); cx.restore();
+    }
+  }
+  drawMini();
+}
+function drawCell(g, px, py) {
+  if (g.type === 'mineral') {
+    cx.fillStyle = '#1d3b5a'; cx.fillRect(px + 2, py + 2, T - 4, T - 4);
+    cx.fillStyle = '#4fc3f7';
+    const k = g.amount / 400;
+    cx.beginPath(); cx.moveTo(px + 8, py + 26); cx.lineTo(px + 12, py + 26 - 18 * k - 2); cx.lineTo(px + 16, py + 26); cx.fill();
+    cx.beginPath(); cx.moveTo(px + 15, py + 26); cx.lineTo(px + 20, py + 26 - 14 * k - 2); cx.lineTo(px + 25, py + 26); cx.fill();
+    if (g.hp < g.maxhp) hpBar(px + 3, py + 1, T - 6, g.hp / g.maxhp, '#ff4d4d');
+    return;
+  }
+  const t = TYPES[g.type];
+  cx.fillStyle = t.color; cx.fillRect(px + 1, py + 1, T - 2, T - 2);
+  cx.fillStyle = 'rgba(255,255,255,.18)'; cx.fillRect(px + 1, py + 1, T - 2, 4);
+  cx.fillStyle = 'rgba(0,0,0,.25)'; cx.fillRect(px + 1, py + T - 5, T - 2, 4);
+  if (g.type === 'wall') { cx.strokeStyle = 'rgba(0,0,0,.3)'; cx.beginPath(); cx.moveTo(px + 1, py + 16); cx.lineTo(px + T - 1, py + 16); cx.moveTo(px + 16, py + 1); cx.lineTo(px + 16, py + 16); cx.moveTo(px + 8, py + 16); cx.lineTo(px + 8, py + T - 1); cx.moveTo(px + 24, py + 16); cx.lineTo(px + 24, py + T - 1); cx.stroke(); }
+  if (g.type === 'steel') { cx.fillStyle = '#c7d3e0'; for (const [a, b] of [[6,6],[24,6],[6,24],[24,24]]) cx.fillRect(px + a, py + b, 3, 3); }
+  if (g.type === 'gate') { cx.strokeStyle = '#5c3f1c'; cx.lineWidth = 2; for (let k = 8; k < T; k += 8) { cx.beginPath(); cx.moveTo(px + k, py + 2); cx.lineTo(px + k, py + T - 2); cx.stroke(); } cx.lineWidth = 1; }
+  if (g.type === 'turret') { cx.fillStyle = '#3a3a3a'; cx.beginPath(); cx.arc(px + 16, py + 16, 9, 0, 7); cx.fill(); cx.fillStyle = '#ffd166'; cx.fillRect(px + 14, py + 3, 4, 13); }
+  if (g.type === 'depot') { cx.fillStyle = '#2d5e41'; cx.fillRect(px + 7, py + 7, 18, 18); cx.fillStyle = '#9ff0bf'; cx.font = 'bold 13px sans-serif'; cx.textAlign = 'center'; cx.fillText('$', px + 16, py + 21); }
+  if (g.hp < g.maxhp) hpBar(px + 3, py + 1, T - 6, g.hp / g.maxhp, g.hp / g.maxhp > .5 ? '#6fe39a' : g.hp / g.maxhp > .25 ? '#ffd166' : '#ff4d4d');
+}
+function hpBar(x, y, w, k, color) {
+  cx.fillStyle = 'rgba(0,0,0,.7)'; cx.fillRect(x - 1, y - 1, w + 2, 5);
+  cx.fillStyle = color; cx.fillRect(x, y, w * Math.max(0, k), 3);
+}
+function drawMini() {
+  const sx = mini.width / W, sy = mini.height / H;
+  mx.fillStyle = '#1e241b'; mx.fillRect(0, 0, mini.width, mini.height);
+  for (let i = 0; i < S.grid.length; i++) {
+    const g = S.grid[i]; if (!g) continue;
+    mx.fillStyle = g.type === 'mineral' ? '#4fc3f7' : TYPES[g.type].color;
+    mx.fillRect((i % W) * sx, ((i / W) | 0) * sy, Math.ceil(sx), Math.ceil(sy));
+  }
+  for (const m of S.mons) { mx.fillStyle = m.kind === 'killer' ? '#ff3030' : '#c77dff'; const r = m.kind === 'killer' ? 4 : 2; mx.fillRect(m.x * sx - r / 2, m.y * sy - r / 2, r, r); }
+  mx.fillStyle = '#ffe24a'; mx.fillRect(S.player.x * sx - 2, S.player.y * sy - 2, 4, 4);
+  mx.strokeStyle = '#fff'; mx.strokeRect(cam.x / T * sx, cam.y / T * sy, cv.width / T * sx, cv.height / T * sy);
+}
+
+// ───────── UI ─────────
+function buildUI() {
+  const b = document.getElementById('bottom'); b.innerHTML = '';
+  for (const [k, t] of Object.entries(TYPES)) {
+    const el = document.createElement('div');
+    el.className = 'btn' + (S.sel === k ? ' sel' : '');
+    el.dataset.cost = t.cost;
+    el.innerHTML = `<span class="k">${t.key}</span>${t.name} <b style="color:#6fe39a">${t.cost}</b><small>${t.desc}</small>`;
+    el.onclick = () => selectBuild(k);
+    b.appendChild(el);
+  }
+  b.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }));
+  const sellEl = document.createElement('div');
+  sellEl.className = 'btn' + (S.sellMode ? ' sel' : '');
+  sellEl.innerHTML = `<span class="k">X</span>판매<small>체력 비례 50% 환불</small>`;
+  sellEl.onclick = toggleSell; b.appendChild(sellEl);
+  const rep = document.createElement('div');
+  rep.className = 'btn' + (S.autoRepair ? ' sel' : '');
+  rep.innerHTML = `<span class="k">R</span>자동수리 ${S.autoRepair ? 'ON' : 'OFF'}<small>주변 건물 수리(돈 소모)</small>`;
+  rep.onclick = () => { S.autoRepair = !S.autoRepair; buildUI(); }; b.appendChild(rep);
+  b.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }));
+  for (const [k, u] of Object.entries(UPGRADES)) {
+    const el = document.createElement('div'), maxed = S.up[k] >= u.max;
+    el.className = 'btn';
+    el.dataset.cost = maxed ? 1e12 : upCost(k);
+    el.innerHTML = `${u.name} Lv${S.up[k]} ${maxed ? '<b style="color:#ffd166">MAX</b>' : `<b style="color:#6fe39a">${upCost(k)}</b>`}<small>${u.desc}</small>`;
+    el.onclick = () => buyUp(k); b.appendChild(el);
+  }
+}
+function selectBuild(k) { S.sel = S.sel === k ? null : k; S.sellMode = false; buildUI(); }
+function toggleSell() { S.sellMode = !S.sellMode; S.sel = null; buildUI(); }
+function updateHUD() {
+  document.querySelector('#money b').textContent = Math.floor(S.money);
+  const ph = document.getElementById('phase');
+  ph.className = S.phase;
+  ph.querySelector('b').textContent = S.phase === 'day' ? '낮' : '밤';
+  ph.firstChild.textContent = S.phase === 'day' ? '☀ ' : '🌙 ';
+  document.getElementById('timer').textContent = Math.max(0, Math.ceil(S.timer));
+  document.getElementById('nightNo').textContent = S.night;
+  document.getElementById('nightMax').textContent = CFG.nights;
+  document.getElementById('hp').textContent = Math.ceil(S.player.hp);
+  document.getElementById('klv').textContent = 'Lv ' + (S.phase === 'night' ? S.night : S.night + 1) + (S.phase === 'day' ? ' (다음 밤)' : '');
+  for (const el of document.querySelectorAll('#bottom .btn[data-cost]')) el.classList.toggle('off', S.money < +el.dataset.cost);
+}
+
+// ───────── 입력 ─────────
+const keys = {};
+function tileAtMouse() { return { x: Math.floor((mouse.x + cam.x) / T), y: Math.floor((mouse.y + cam.y) / T) }; }
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('mousedown', e => {
+  if (!S || S.over) return;
+  mouse.x = e.clientX; mouse.y = e.clientY;
+  const t = tileAtMouse();
+  if (e.button === 2) {
+    if (S.sel || S.sellMode) { S.sel = null; S.sellMode = false; buildUI(); return; }
+    const c = cell(t.x, t.y);
+    if (c && c.type === 'mineral') orderMine(t.x, t.y); else if (inb(t.x, t.y)) orderMove(t.x, t.y);
+    return;
+  }
+  if (e.button !== 0) return;
+  mouse.down = true; mouse.lastTile = idx(t.x, t.y);
+  if (S.sel) place(t.x, t.y);
+  else if (S.sellMode) sell(t.x, t.y);
+  else { const c = cell(t.x, t.y); if (c && c.type === 'mineral') orderMine(t.x, t.y); else if (inb(t.x, t.y)) orderMove(t.x, t.y); }
+});
+addEventListener('mouseup', () => mouse.down = false);
+cv.addEventListener('mousemove', e => {
+  mouse.x = e.clientX; mouse.y = e.clientY;
+  if (!mouse.down || !S || !S.sel) return;
+  const t = tileAtMouse(), i = idx(t.x, t.y);
+  if (i !== mouse.lastTile && inb(t.x, t.y)) { mouse.lastTile = i; place(t.x, t.y); } // 드래그로 연속 건설
+});
+mini.addEventListener('mousedown', e => {
+  if (!S || S.over) return;
+  const r = mini.getBoundingClientRect();
+  orderMove(Math.floor((e.clientX - r.left) / mini.width * W), Math.floor((e.clientY - r.top) / mini.height * H));
+});
+addEventListener('keydown', e => {
+  if (!S) return;
+  const k = e.key.toLowerCase();
+  keys[k] = true;
+  for (const [tk, t] of Object.entries(TYPES)) if (t.key === k) selectBuild(tk);
+  if (k === 'x') toggleSell();
+  if (k === 'r') { S.autoRepair = !S.autoRepair; buildUI(); }
+  if (k === 'p') { S.paused = !S.paused; banner(S.paused ? '일시정지' : '계속'); }
+  if (k === 'escape') { S.sel = null; S.sellMode = false; buildUI(); }
+  if (k === 'n' && S.phase === 'day') S.timer = Math.min(S.timer, 3); // 낮 건너뛰기
+});
+addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+addEventListener('resize', resize);
+
+// ───────── 루프 ─────────
+let last = performance.now();
+function loop(now) {
+  requestAnimationFrame(loop);
+  if (cv.width !== Math.max(1, innerWidth) || cv.height !== Math.max(1, innerHeight)) resize();
+  const dt = Math.min(.05, (now - last) / 1000); last = now;
+  if (S && !S.over && !S.paused) update(dt);
+  if (S) { draw(); updateHUD(); }
+}
+function start() {
+  document.getElementById('overlay').style.display = 'none';
+  newGame();
+}
+document.getElementById('startBtn').onclick = start;
+resize();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
