@@ -49,7 +49,7 @@
   <span>🌙 밤 <b id="nightNo">0</b> / <span id="nightMax">10</span></span>
   <span>❤ 체력 <b id="hp">100</b></span>
   <span>👹 킬러 <b id="klv">Lv 1</b></span>
-  <span id="hint" style="margin-left:auto;color:#9aa6b4;font-size:12px">우클릭 이동·채굴 · WASD 이동 · 1~5 건설 · X 판매 · R 자동수리 · N 밤 바로 시작 · P 일시정지</span>
+  <span id="hint" style="margin-left:auto;color:#9aa6b4;font-size:12px">우클릭 이동·채굴 · WASD 이동 · 1~5 건설 · X 판매 · R 자동수리 · N 밤 바로 시작 · F 2배속 · P 일시정지</span>
 </div>
 <div id="log"></div>
 <div id="bottom"></div>
@@ -64,7 +64,8 @@
     <li>킬러는 밤마다 강해진다. 밤 중에 킬러를 쓰러뜨리면 <b>격퇴</b> — 밤이 일찍 끝나고 보상을 받는다.</li>
     <li>보급고는 돈을 계속 벌어 주고, 문은 나만 지나갈 수 있다.</li>
     <li>가까이 있는 부서진 건물은 자동으로 수리한다(돈 소모, R로 끄고 켜기).</li>
-    <li><b>10번째 밤</b>을 버티면 승리!</li>
+    <li>10번째 밤마다 <b>보스 킬러</b>가 나온다. <b>100번째 밤</b>을 버티면 승리!</li>
+    <li>매일 새벽 자동 저장 — 다음에 '이어하기'로 계속할 수 있다.</li>
   </ul>
   <button id="startBtn">시작</button>
 </div></div>
@@ -74,7 +75,7 @@
 const T = 32, W = 64, H = 48;
 const CFG = {
   startMoney: 150, passive: 1, mineAmount: 8, mineTime: 1.0,
-  firstDay: 75, day: 40, night: 50, nights: 10,
+  firstDay: 75, day: 40, night: 50, nights: 100,
   buildRange: 8, playerSpeed: 4.2, playerHp: 150,
   repairRate: 30, repairCostPer: 0.12,   // 초당 HP, HP당 비용
 };
@@ -83,16 +84,22 @@ const TYPES = {
   steel:  { key: '2', name: '철벽',   cost: 80,  hp: 650, color: '#5f7d9c', desc: '튼튼한 강화 벽' },
   gate:   { key: '3', name: '문',     cost: 40,  hp: 260, color: '#a0763f', desc: '나만 지나갈 수 있다', pass: true },
   turret: { key: '4', name: '터렛',   cost: 120, hp: 220, color: '#c9a227', desc: '사거리 4.5 자동 공격', range: 4.5, dmg: 14, rate: 0.6 },
-  depot:  { key: '5', name: '보급고', cost: 150, hp: 360, color: '#4e9a6b', desc: '초당 +2원', income: 2 },
+  depot:  { key: '5', name: '보급고', cost: 150, hp: 360, color: '#4e9a6b', desc: '초당 +3원 · 지을수록 +20원', income: 3 },
 };
 const WALLISH = ['wall', 'steel', 'gate'];
 const UPGRADES = {
-  armor:  { name: '벽 강화',   desc: '벽·철벽·문 체력 +30%', base: 120, step: 1.6, max: 8 },
-  gun:    { name: '터렛 화력', desc: '터렛 공격력 +30%',     base: 150, step: 1.6, max: 8 },
-  pick:   { name: '채굴 숙련', desc: '채굴량 +40%',           base: 100, step: 1.7, max: 6 },
+  armor:  { name: '벽 강화',   desc: '벽·철벽·문 체력 +30%', base: 120, max: 40 },
+  gun:    { name: '터렛 화력', desc: '터렛 공격력 +30%',     base: 150, max: 40 },
+  body:   { name: '갑옷',      desc: '내 최대 체력 +40%',     base: 100, max: 40 },
+  pick:   { name: '채굴 숙련', desc: '채굴량 +40%',           base: 100, max: 15 },
 };
-const killerStat = n => ({ hp: Math.round(320 * Math.pow(1.5, n - 1)), dmg: 12 * Math.pow(1.38, n - 1), rate: 0.9, spd: 2.3 });
-const minionStat = n => ({ hp: Math.round(50 * Math.pow(1.38, n - 1)), dmg: 4 * Math.pow(1.32, n - 1), rate: 0.7, spd: 2.9 });
+// 100밤까지 가야 하므로 지수 대신 다항식 성장. 10의 배수 밤은 보스(체력 ×1.6, 공격 ×1.2)
+const isBossNight = n => n % 10 === 0;
+const killerStat = n => { const g = 1 + 0.2 * (n - 1), b = isBossNight(n);
+  return { hp: Math.round(320 * g * g * (b ? 1.6 : 1)), dmg: 12 * Math.pow(1 + 0.2 * (n - 1), 1.6) * (b ? 1.2 : 1), rate: 0.9, spd: 2.3, boss: b }; };
+const minionStat = n => ({ hp: Math.round(50 * Math.pow(1 + 0.2 * (n - 1), 1.8)), dmg: 4 * Math.pow(1 + 0.2 * (n - 1), 1.5), rate: 0.7, spd: 2.9 });
+const minionCount = n => 2 + Math.min(38, Math.floor(n * 0.8));
+const SAVE_KEY = 'wallSurvivalSave';
 
 // ───────── 상태 ─────────
 let S;
@@ -108,8 +115,8 @@ function newGame() {
     grid: new Array(W * H).fill(null),
     player: { x: W / 2 + .5, y: H / 2 + .5, hp: CFG.playerHp, path: [], mine: -1, mineT: 0, atkCd: 0 },
     mons: [], fx: [], floats: [],
-    sel: null, sellMode: false, autoRepair: true, paused: false, over: false,
-    up: { armor: 0, gun: 0, pick: 0 },
+    sel: null, sellMode: false, autoRepair: true, paused: false, over: false, speed: 1,
+    up: { armor: 0, gun: 0, body: 0, pick: 0 },
     field: new Float32Array(W * H), fieldT: 0, spawnQ: [], killer: null, kills: 0,
   };
   // 미네랄 덩어리
@@ -138,7 +145,13 @@ function maxHpOf(type) {
   if (WALLISH.includes(type)) hp *= 1 + 0.3 * S.up.armor;
   return Math.round(hp);
 }
-function upCost(k) { return Math.round(UPGRADES[k].base * Math.pow(UPGRADES[k].step, S.up[k])); }
+function playerMax() { return Math.round(CFG.playerHp * (1 + 0.4 * S.up.body)); }
+function upCost(k) { return Math.round(UPGRADES[k].base * Math.pow(1 + S.up[k], 1.35)); }
+function costOf(type) {
+  if (type !== 'depot') return TYPES[type].cost;
+  let n = 0; for (const g of S.grid) if (g && g.type === 'depot') n++;
+  return TYPES.depot.cost + 20 * n;
+}
 function log(msg, color) {
   const el = document.getElementById('log'), d = document.createElement('div');
   d.textContent = msg; if (color) d.style.color = color;
@@ -220,10 +233,11 @@ function canPlace(tx, ty) {
   return true;
 }
 function place(tx, ty) {
-  const t = TYPES[S.sel];
+  const cost = costOf(S.sel);
   if (!canPlace(tx, ty)) return false;
-  if (S.money < t.cost) { log('돈이 부족합니다', '#ff9b9b'); return false; }
-  S.money -= t.cost;
+  if (S.money < cost) { log('돈이 부족합니다', '#ff9b9b'); return false; }
+  S.money -= cost;
+  if (S.sel === 'depot') setTimeout(buildUI);
   const hp = maxHpOf(S.sel);
   S.grid[idx(tx, ty)] = { type: S.sel, hp, maxhp: hp, cd: 0 };
   S.fieldT = 0;
@@ -240,6 +254,7 @@ function sell(tx, ty) {
   if (!c || !TYPES[c.type]) return;
   const refund = Math.floor(TYPES[c.type].cost * 0.5 * c.hp / c.maxhp);
   S.money += refund; S.grid[idx(tx, ty)] = null; S.fieldT = 0;
+  if (c.type === 'depot') buildUI();
   floatText(tx + .5, ty + .5, '+' + refund, '#6fe39a');
 }
 function buyUp(k) {
@@ -250,6 +265,7 @@ function buyUp(k) {
   if (k === 'armor') for (const g of S.grid) if (g && WALLISH.includes(g.type)) {
     const nm = maxHpOf(g.type); g.hp += nm - g.maxhp; g.maxhp = nm;
   }
+  if (k === 'body') S.player.hp += CFG.playerHp * 0.4;
   log(`${UPGRADES[k].name} Lv ${S.up[k]}`, '#7fd3ff');
   buildUI();
 }
@@ -270,26 +286,27 @@ function edgeSpawn() {
 function startNight() {
   S.phase = 'night'; S.night++; S.timer = CFG.night;
   const ks = killerStat(S.night), at = edgeSpawn();
-  S.killer = { kind: 'killer', x: at.x, y: at.y, hp: ks.hp, maxhp: ks.hp, dmg: ks.dmg, rate: ks.rate, spd: ks.spd, cd: 0, r: .45 };
+  S.killer = { kind: 'killer', x: at.x, y: at.y, hp: ks.hp, maxhp: ks.hp, dmg: ks.dmg, rate: ks.rate, spd: ks.spd, cd: 0, r: ks.boss ? .55 : .45, boss: ks.boss };
   S.mons.push(S.killer);
-  const n = 2 + S.night * 2;
+  const n = minionCount(S.night);
   for (let i = 0; i < n; i++) S.spawnQ.push(1 + i * (14 / n));
   S.spawnClock = 0;
   S.fieldT = 0;
-  banner(`${S.night}번째 밤`, `킬러 Lv ${S.night} 출현! (체력 ${ks.hp})`);
+  banner(ks.boss ? `${S.night}번째 밤 — 보스!` : `${S.night}번째 밤`, `${ks.boss ? '보스 ' : ''}킬러 Lv ${S.night} 출현! (체력 ${ks.hp})`);
 }
 function endNight(repelled) {
   for (const m of S.mons) S.fx.push({ kind: 'puff', x: m.x, y: m.y, t: .6 });
   S.mons = []; S.spawnQ = []; S.killer = null;
   if (S.night >= CFG.nights) { gameOver(true); return; }
-  const bonus = 60 + S.night * (repelled ? 60 : 30);
+  const bonus = 60 + S.night * (repelled ? 80 : 45);
   S.money += bonus;
   S.phase = 'day'; S.timer = CFG.day;
-  S.player.hp = Math.min(CFG.playerHp, S.player.hp + 50);
-  banner(repelled ? '킬러 격퇴!' : '날이 밝았다', `보상 +${bonus}원 · 다음은 ${S.night + 1}번째 밤`);
+  S.player.hp = Math.min(playerMax(), S.player.hp + playerMax() * .4);
+  banner(repelled ? '킬러 격퇴!' : '날이 밝았다', `보상 +${bonus}원 · 다음은 ${S.night + 1}번째 밤${isBossNight(S.night + 1) ? ' (보스)' : ''} · 자동 저장됨`);
+  saveGame();
 }
 function gameOver(win) {
-  S.over = true;
+  S.over = true; clearSave();
   const o = document.getElementById('overlay');
   o.style.display = 'flex';
   o.querySelector('.box').innerHTML = win
@@ -306,7 +323,7 @@ function update(dt) {
   if (S.over) return;
 
   // 수입
-  let inc = CFG.passive;
+  let inc = CFG.passive * (1 + 0.2 * S.night); // 밤을 넘길수록 기본 수입 증가
   for (const g of S.grid) if (g && g.type === 'depot') inc += TYPES.depot.income;
   S.money += inc * dt;
 
@@ -350,7 +367,7 @@ function update(dt) {
     }
   }
   p.atkCd -= dt;
-  if (S.phase === 'day' && p.hp < CFG.playerHp) p.hp = Math.min(CFG.playerHp, p.hp + 2 * dt);
+  if (S.phase === 'day' && p.hp < playerMax()) p.hp = Math.min(playerMax(), p.hp + playerMax() * .015 * dt);
 
   // 밤: 졸개 스폰
   if (S.phase === 'night') {
@@ -496,9 +513,9 @@ function draw() {
       cx.fillStyle = '#b3202a'; cx.beginPath();
       for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2 + performance.now() / 600, rr = k % 2 ? r : r * 1.35;
         cx.lineTo(m.x * T + Math.cos(a) * rr, m.y * T + Math.sin(a) * rr); }
-      cx.fill(); cx.fillStyle = '#ffde59'; cx.beginPath(); cx.arc(m.x * T - 5, m.y * T - 3, 3, 0, 7); cx.arc(m.x * T + 5, m.y * T - 3, 3, 0, 7); cx.fill();
+      cx.fill(); if (m.boss) { cx.strokeStyle = '#ffd166'; cx.lineWidth = 3; cx.stroke(); cx.lineWidth = 1; } cx.fillStyle = '#ffde59'; cx.beginPath(); cx.arc(m.x * T - 5, m.y * T - 3, 3, 0, 7); cx.arc(m.x * T + 5, m.y * T - 3, 3, 0, 7); cx.fill();
       hpBar(m.x * T - 22, m.y * T - r - 16, 44, m.hp / m.maxhp, '#ff4d4d');
-      cx.fillStyle = '#fff'; cx.font = 'bold 11px sans-serif'; cx.textAlign = 'center'; cx.fillText('킬러 Lv ' + S.night, m.x * T, m.y * T - r - 20);
+      cx.fillStyle = '#fff'; cx.font = 'bold 11px sans-serif'; cx.textAlign = 'center'; cx.fillText((m.boss ? '보스 킬러 Lv ' : '킬러 Lv ') + S.night, m.x * T, m.y * T - r - 20);
     } else {
       cx.fillStyle = '#8e44ad'; cx.beginPath(); cx.arc(m.x * T, m.y * T, r, 0, 7); cx.fill();
       cx.fillStyle = '#e0c3f5'; cx.fillRect(m.x * T - 4, m.y * T - 3, 2, 2); cx.fillRect(m.x * T + 2, m.y * T - 3, 2, 2);
@@ -514,7 +531,7 @@ function draw() {
     cx.strokeStyle = '#ccc'; cx.lineWidth = 3; cx.beginPath(); cx.moveTo(p.x * T, p.y * T);
     cx.lineTo(p.x * T + Math.cos(a - .6) * 14, p.y * T + Math.sin(a - .6) * 14); cx.stroke(); cx.lineWidth = 1;
   }
-  hpBar(p.x * T - 14, p.y * T - 20, 28, p.hp / CFG.playerHp, '#6fe39a');
+  hpBar(p.x * T - 14, p.y * T - 20, 28, p.hp / playerMax(), '#6fe39a');
   // 효과
   for (const f of S.fx) {
     if (f.kind === 'shot') { cx.strokeStyle = '#ffe28a'; cx.lineWidth = 2; cx.beginPath(); cx.moveTo(f.x * T, f.y * T); cx.lineTo(f.x2 * T, f.y2 * T); cx.stroke(); cx.lineWidth = 1; }
@@ -525,7 +542,7 @@ function draw() {
   // 고스트
   const t = tileAtMouse();
   if (S.sel && inb(t.x, t.y)) {
-    const ok = canPlace(t.x, t.y) && S.money >= TYPES[S.sel].cost;
+    const ok = canPlace(t.x, t.y) && S.money >= costOf(S.sel);
     cx.globalAlpha = .55; drawCell({ type: S.sel, hp: 1, maxhp: 1 }, t.x * T, t.y * T); cx.globalAlpha = 1;
     cx.strokeStyle = ok ? '#6fe39a' : '#ff5555'; cx.lineWidth = 2; cx.strokeRect(t.x * T + 1, t.y * T + 1, T - 2, T - 2); cx.lineWidth = 1;
   } else if (S.sellMode && inb(t.x, t.y)) {
@@ -610,8 +627,8 @@ function buildUI() {
   for (const [k, t] of Object.entries(TYPES)) {
     const el = document.createElement('div');
     el.className = 'btn' + (S.sel === k ? ' sel' : '');
-    el.dataset.cost = t.cost;
-    el.innerHTML = `<span class="k">${t.key}</span>${t.name} <b style="color:#6fe39a">${t.cost}</b><small>${t.desc}</small>`;
+    el.dataset.cost = costOf(k);
+    el.innerHTML = `<span class="k">${t.key}</span>${t.name} <b style="color:#6fe39a">${costOf(k)}</b><small>${t.desc}</small>`;
     el.onclick = () => selectBuild(k);
     b.appendChild(el);
   }
@@ -644,8 +661,9 @@ function updateHUD() {
   document.getElementById('timer').textContent = Math.max(0, Math.ceil(S.timer));
   document.getElementById('nightNo').textContent = S.night;
   document.getElementById('nightMax').textContent = CFG.nights;
-  document.getElementById('hp').textContent = Math.ceil(S.player.hp);
-  document.getElementById('klv').textContent = 'Lv ' + (S.phase === 'night' ? S.night : S.night + 1) + (S.phase === 'day' ? ' (다음 밤)' : '');
+  document.getElementById('hp').textContent = Math.ceil(S.player.hp) + ' / ' + playerMax();
+  const kn = S.phase === 'night' ? S.night : S.night + 1;
+  document.getElementById('klv').textContent = (isBossNight(kn) ? '보스 ' : '') + 'Lv ' + kn + (S.phase === 'day' ? ' (다음 밤)' : '') + (S.speed > 1 ? ' · ×' + S.speed : '');
   for (const el of document.querySelectorAll('#bottom .btn[data-cost]')) el.classList.toggle('off', S.money < +el.dataset.cost);
 }
 
@@ -688,6 +706,7 @@ addEventListener('keydown', e => {
   for (const [tk, t] of Object.entries(TYPES)) if (t.key === k) selectBuild(tk);
   if (k === 'x') toggleSell();
   if (k === 'r') { S.autoRepair = !S.autoRepair; buildUI(); }
+  if (k === 'f') { S.speed = S.speed === 1 ? 2 : 1; banner(S.speed === 2 ? '2배속' : '보통 속도'); }
   if (k === 'p') { S.paused = !S.paused; banner(S.paused ? '일시정지' : '계속'); }
   if (k === 'escape') { S.sel = null; S.sellMode = false; buildUI(); }
   if (k === 'n' && S.phase === 'day') S.timer = Math.min(S.timer, 3); // 낮 건너뛰기
@@ -702,14 +721,40 @@ function loop(now) {
   requestAnimationFrame(loop);
   if (cv.width !== Math.max(1, innerWidth) || cv.height !== Math.max(1, innerHeight)) resize();
   const dt = Math.min(.05, (now - last) / 1000); last = now;
-  if (S && !S.over && !S.paused) update(dt);
+  if (S && !S.over && !S.paused) for (let k = 0; k < S.speed && !S.over; k++) update(dt);
   if (S) { draw(); updateHUD(); }
 }
-function start() {
-  document.getElementById('overlay').style.display = 'none';
-  newGame();
+// ───────── 저장 (매일 새벽 자동) ─────────
+function saveGame() {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, money: S.money, night: S.night, kills: S.kills, up: S.up,
+      autoRepair: S.autoRepair, player: { x: S.player.x, y: S.player.y, hp: S.player.hp }, grid: S.grid }));
+  } catch (e) {}
 }
-document.getElementById('startBtn').onclick = start;
+function loadSave() { try { const d = JSON.parse(localStorage.getItem(SAVE_KEY)); return d && d.v === 1 ? d : null; } catch (e) { return null; } }
+function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) {} }
+function start(resume) {
+  document.getElementById('overlay').style.display = 'none';
+  const d = resume ? loadSave() : null;
+  if (!resume) clearSave();
+  newGame();
+  if (d) {
+    Object.assign(S, { money: d.money, night: d.night, kills: d.kills, up: Object.assign(S.up, d.up), autoRepair: d.autoRepair, grid: d.grid, timer: CFG.day });
+    Object.assign(S.player, d.player);
+    buildUI();
+    banner(`${d.night}번째 밤 이후부터 이어하기`, `다음은 ${d.night + 1}번째 밤`);
+  }
+}
+document.getElementById('startBtn').onclick = () => start(false);
+{
+  const d = loadSave();
+  if (d) {
+    const b = document.createElement('button');
+    b.textContent = `이어하기 (${d.night}번째 밤 생존)`; b.style.marginLeft = '8px'; b.style.background = '#7fd3ff';
+    b.onclick = () => start(true);
+    document.getElementById('startBtn').after(b);
+  }
+}
 resize();
 requestAnimationFrame(loop);
 </script>
